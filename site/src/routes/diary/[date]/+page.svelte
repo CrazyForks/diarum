@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import MarkdownEditor from '$lib/components/editor/MarkdownEditor.svelte';
-	import { getDiaryByDate, saveDiary } from '$lib/api/diaries';
+	import { getDiaryByDate } from '$lib/api/diaries';
 	import { isAuthenticated } from '$lib/api/client';
 	import {
 		formatDisplayDate,
@@ -13,16 +13,25 @@
 		getToday,
 		isToday
 	} from '$lib/utils/date';
+	import {
+		diaryCache,
+		syncState,
+		updateLocalCache,
+		updateFromServer,
+		getCachedContent,
+		forceSyncNow
+	} from '$lib/stores/diaryCache';
 
 	let content = '';
 	let loading = true;
-	let saving = false;
-	let saveStatus = '';
-	let saveTimer: NodeJS.Timeout;
 
 	// Use reactive statement to always get current date from URL
 	$: date = $page.params.date;
 	$: canGoNext = !isToday(date);
+
+	// Subscribe to sync state for UI updates
+	$: saving = $syncState.isSyncing;
+	$: saveStatus = $syncState.message;
 
 	// Navigation - use current page params directly
 	function goToPreviousDay() {
@@ -49,55 +58,37 @@
 	// Load diary content
 	async function loadDiary() {
 		loading = true;
+
+		// Check if we have dirty cache first
+		const cached = getCachedContent(date);
+		if (cached && cached.isDirty) {
+			// Use cached content if it has unsaved changes
+			content = cached.content;
+			loading = false;
+			return;
+		}
+
+		// Fetch from server
 		const diary = await getDiaryByDate(date);
-		content = diary?.content || '';
+
+		// Update cache from server
+		updateFromServer(date, diary);
+
+		// Get content from cache (which now has server data)
+		const updatedCache = getCachedContent(date);
+		content = updatedCache?.content || '';
 		loading = false;
 	}
 
-	// Auto-save with debounce
+	// Auto-save with debounce - update local cache
 	function handleContentChange(newContent: string) {
 		content = newContent;
-		saveStatus = 'Saving...';
-		saving = true;
-
-		clearTimeout(saveTimer);
-		saveTimer = setTimeout(async () => {
-			const success = await saveDiary({
-				date,
-				content
-			});
-
-			if (success) {
-				saveStatus = 'Saved';
-				setTimeout(() => {
-					saveStatus = '';
-				}, 2000);
-			} else {
-				saveStatus = 'Failed to save';
-			}
-			saving = false;
-		}, 2000);
+		updateLocalCache(date, newContent);
 	}
 
 	// Manual save
 	async function handleManualSave() {
-		saving = true;
-		saveStatus = 'Saving...';
-
-		const success = await saveDiary({
-			date,
-			content
-		});
-
-		if (success) {
-			saveStatus = 'Saved';
-			setTimeout(() => {
-				saveStatus = '';
-			}, 2000);
-		} else {
-			saveStatus = 'Failed to save';
-		}
-		saving = false;
+		await forceSyncNow();
 	}
 
 	// Keyboard shortcuts
@@ -119,7 +110,6 @@
 
 		return () => {
 			window.removeEventListener('keydown', handleKeyboard);
-			clearTimeout(saveTimer);
 		};
 	});
 
@@ -223,9 +213,9 @@
 				<div class="flex items-center gap-3">
 					{#if saveStatus}
 						<span
-							class="text-sm {saveStatus === 'Saved'
+							class="text-sm {$syncState.status === 'saved'
 								? 'text-green-600'
-								: saveStatus === 'Saving...'
+								: $syncState.status === 'saving'
 									? 'text-gray-500'
 									: 'text-red-600'}"
 						>
