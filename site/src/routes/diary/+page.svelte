@@ -41,8 +41,8 @@
 <div class="min-h-screen bg-background">
 	<!-- Header -->
 	<header class="glass border-b border-border/50 sticky top-0 z-20">
-		<div class="max-w-6xl mx-auto px-4 py-2">
-			<div class="flex items-center justify-between">
+		<div class="max-w-6xl mx-auto px-4 h-11">
+			<div class="flex items-center justify-between h-full">
 				<h1 class="text-lg font-semibold text-foreground">Diaria</h1>
 
 				<div class="flex items-center gap-2">

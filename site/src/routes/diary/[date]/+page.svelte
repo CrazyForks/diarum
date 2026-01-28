@@ -121,8 +121,8 @@
 	<div class="sticky top-0 z-20">
 		<!-- Compact Glass Header -->
 		<header class="glass border-b border-border/50">
-		<div class="max-w-6xl mx-auto px-4 py-2">
-			<div class="flex items-center justify-between">
+		<div class="max-w-6xl mx-auto px-4 h-11">
+			<div class="flex items-center justify-between h-full">
 				<!-- Left: Brand -->
 				<h1 class="text-lg font-semibold text-foreground">Diaria</h1>
 
@@ -252,7 +252,7 @@
 
 			<!-- Desktop TOC Sidebar -->
 			<aside class="hidden lg:block w-56 flex-shrink-0">
-				<div class="sticky top-16 animate-slide-in-right">
+				<div class="sticky top-11 animate-slide-in-right">
 					<div class="bg-card/50 rounded-xl border border-border/50 p-4">
 						<TableOfContents {content} />
 					</div>
