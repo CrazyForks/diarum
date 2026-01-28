@@ -14,23 +14,31 @@
 		isToday
 	} from '$lib/utils/date';
 
-	let date = $page.params.date;
 	let content = '';
 	let loading = true;
 	let saving = false;
 	let saveStatus = '';
 	let saveTimer: NodeJS.Timeout;
 
-	// Navigation
+	// Use reactive statement to always get current date from URL
+	$: date = $page.params.date;
+	$: canGoNext = !isToday(date);
+
+	// Navigation - use current page params directly
 	function goToPreviousDay() {
-		goto(`/diary/${getPreviousDay(date)}`);
+		const prevDate = getPreviousDay($page.params.date);
+		goto(`/diary/${prevDate}`);
 	}
 
 	function goToNextDay() {
-		goto(`/diary/${getNextDay(date)}`);
+		const currentDate = $page.params.date;
+		if (isToday(currentDate)) return;
+		const nextDate = getNextDay(currentDate);
+		goto(`/diary/${nextDate}`);
 	}
 
 	function goToToday() {
+		if (isToday($page.params.date)) return;
 		goto(`/diary/${getToday()}`);
 	}
 
@@ -107,7 +115,6 @@
 			return;
 		}
 
-		loadDiary();
 		window.addEventListener('keydown', handleKeyboard);
 
 		return () => {
@@ -117,8 +124,9 @@
 	});
 
 	// Reload when date changes
-	$: if (date !== $page.params.date) {
-		date = $page.params.date;
+	let previousDate = '';
+	$: if (date && date !== previousDate) {
+		previousDate = date;
 		loadDiary();
 	}
 </script>
@@ -136,7 +144,8 @@
 				<div class="flex items-center gap-2">
 					<button
 						on:click={goToPreviousDay}
-						class="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+						disabled={loading}
+						class="p-2 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
 						title="Previous day"
 					>
 						<svg
@@ -156,8 +165,9 @@
 
 					<button
 						on:click={goToNextDay}
-						class="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-						title="Next day"
+						disabled={loading || !canGoNext}
+						class="p-2 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+						title={canGoNext ? "Next day" : "Cannot go beyond today"}
 					>
 						<svg
 							class="w-5 h-5"
@@ -176,7 +186,8 @@
 
 					<button
 						on:click={goToCalendar}
-						class="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+						disabled={loading}
+						class="p-2 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
 						title="Calendar"
 					>
 						<svg
@@ -238,8 +249,12 @@
 	<!-- Editor -->
 	<main class="max-w-4xl mx-auto px-4 py-8">
 		{#if loading}
-			<div class="flex items-center justify-center py-20">
-				<div class="text-gray-500">Loading...</div>
+			<div class="flex flex-col items-center justify-center py-20 gap-3">
+				<svg class="w-8 h-8 animate-spin text-blue-600" fill="none" viewBox="0 0 24 24">
+					<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+					<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+				</svg>
+				<div class="text-gray-500">Loading diary...</div>
 			</div>
 		{:else}
 			<div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
