@@ -1,0 +1,49 @@
+# Binaries
+diaria
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+*.out
+
+# Go workspace file
+go.work
+
+# PocketBase data
+pb_data/
+!pb_data/.gitkeep
+
+# Build artifacts
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Frontend
+site/node_modules/
+site/build/
+site/.svelte-kit/
+site/package-lock.json
+site/pnpm-lock.yaml
+site/yarn.lock
+
+# Logs
+*.log
+logs/
+
+# Environment
+.env
+.env.local
