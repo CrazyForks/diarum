@@ -56,26 +56,35 @@
 	}
 
 	// Load diary content
-	async function loadDiary() {
+	async function loadDiary(targetDate: string) {
+		// Immediately show cached content if available
+		const cached = getCachedContent(targetDate);
+		if (cached) {
+			content = cached.content;
+			// If dirty, don't fetch from server
+			if (cached.isDirty) {
+				loading = false;
+				return;
+			}
+		} else {
+			content = '';
+		}
+
 		loading = true;
 
-		// Check if we have dirty cache first
-		const cached = getCachedContent(date);
-		if (cached && cached.isDirty) {
-			// Use cached content if it has unsaved changes
-			content = cached.content;
-			loading = false;
+		// Fetch from server
+		const diary = await getDiaryByDate(targetDate);
+
+		// Check if date changed during fetch
+		if (targetDate !== date) {
 			return;
 		}
 
-		// Fetch from server
-		const diary = await getDiaryByDate(date);
-
 		// Update cache from server
-		updateFromServer(date, diary);
+		updateFromServer(targetDate, diary);
 
-		// Get content from cache (which now has server data)
-		const updatedCache = getCachedContent(date);
+		// Get content from cache
+		const updatedCache = getCachedContent(targetDate);
 		content = updatedCache?.content || '';
 		loading = false;
 	}
@@ -117,7 +126,7 @@
 	let previousDate = '';
 	$: if (date && date !== previousDate) {
 		previousDate = date;
-		loadDiary();
+		loadDiary(date);
 	}
 </script>
 
