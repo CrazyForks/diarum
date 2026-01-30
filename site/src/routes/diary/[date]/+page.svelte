@@ -30,6 +30,7 @@
 	let loading = true;
 	let loadRequestId = 0;
 	let showMobileToc = false;
+	let showDesktopToc = true;
 
 	$: date = $page.params.date;
 	$: canGoNext = !isToday(date);
@@ -187,10 +188,16 @@
 						</button>
 					{/if}
 
-					<!-- Mobile TOC Toggle -->
+					<!-- TOC Toggle -->
 					<button
-						on:click={() => (showMobileToc = !showMobileToc)}
-						class="lg:hidden p-1.5 hover:bg-muted/50 rounded-lg transition-all duration-200"
+						on:click={() => {
+							if (window.innerWidth >= 1024) {
+								showDesktopToc = !showDesktopToc;
+							} else {
+								showMobileToc = !showMobileToc;
+							}
+						}}
+						class="p-1.5 hover:bg-muted/50 rounded-lg transition-all duration-200 {(showDesktopToc || showMobileToc) ? 'bg-muted/50' : ''}"
 						title="Table of contents"
 					>
 						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -254,13 +261,15 @@
 			</main>
 
 			<!-- Desktop TOC Sidebar -->
-			<aside class="hidden lg:block w-56 flex-shrink-0">
-				<div class="sticky top-11 animate-slide-in-right">
-					<div class="bg-card/50 rounded-xl border border-border/50 p-4">
-						<TableOfContents {content} />
+			{#if showDesktopToc}
+				<aside class="hidden lg:block w-56 flex-shrink-0">
+					<div class="sticky top-11 animate-slide-in-right">
+						<div class="bg-card/50 rounded-xl border border-border/50 p-4">
+							<TableOfContents {content} />
+						</div>
 					</div>
-				</div>
-			</aside>
+				</aside>
+			{/if}
 		</div>
 	</div>
 
