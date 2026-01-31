@@ -69,6 +69,22 @@ func (v *VectorDB) DeleteCollection(userID string) error {
 	return v.db.DeleteCollection(collName)
 }
 
+// GetCollection gets a collection for a user (read-only)
+// Note: We use a placeholder embedding func to prevent chromem-go from setting
+// the default OpenAI embedding func, which would override our custom func later.
+func (v *VectorDB) GetCollection(userID string) *chromem.Collection {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	collName := fmt.Sprintf("%s_%s", collectionName, userID)
+	// Use a placeholder func that returns an error if called.
+	// This prevents chromem-go from using the default OpenAI func.
+	placeholderFunc := func(ctx context.Context, text string) ([]float32, error) {
+		return nil, fmt.Errorf("placeholder embedding func called - this should not happen")
+	}
+	return v.db.GetCollection(collName, placeholderFunc)
+}
+
 // Close closes the vector database
 func (v *VectorDB) Close() error {
 	// chromem-go doesn't have a Close method, but we keep this for future compatibility
