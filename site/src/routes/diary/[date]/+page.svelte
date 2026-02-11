@@ -23,8 +23,13 @@
 		updateFromServer,
 		getCachedContent,
 		forceSyncNow,
-		hasDirtyCache
+		hasDirtyCache,
+		initDiaryCache,
+		cleanupDiaryCache
 	} from '$lib/stores/diaryCache';
+	import { onlineState } from '$lib/stores/onlineStatus';
+	import { isInCacheRange } from '$lib/stores/persistence';
+	import { getConfig } from '$lib/stores/syncConfig';
 
 	let content = '';
 	let loading = true;
@@ -61,23 +66,67 @@
 	async function loadDiary(targetDate: string) {
 		const currentRequestId = ++loadRequestId;
 		const cached = getCachedContent(targetDate);
+		const config = getConfig();
+		const inCacheRange = isInCacheRange(targetDate, config.cacheDays);
+
+		// If we have cache, use it immediately
 		if (cached) {
 			content = cached.content;
+			// If dirty, don't fetch from server at all
 			if (cached.isDirty) {
 				loading = false;
+				return;
+			}
+			// If in cache range and have valid cache, show content immediately
+			// and optionally refresh in background
+			if (inCacheRange) {
+				loading = false;
+				// Background refresh only if online
+				if ($onlineState.isOnline) {
+					refreshInBackground(targetDate, currentRequestId);
+				}
 				return;
 			}
 		} else {
 			content = '';
 		}
+
+		// No cache or outside cache range - need to fetch
 		loading = true;
-		const diary = await getDiaryByDate(targetDate);
-		if (currentRequestId !== loadRequestId) return;
-		updateFromServer(targetDate, diary);
-		if (currentRequestId !== loadRequestId) return;
-		const updatedCache = getCachedContent(targetDate);
-		content = updatedCache?.content || '';
+		try {
+			const diary = await getDiaryByDate(targetDate);
+			if (currentRequestId !== loadRequestId) return;
+			updateFromServer(targetDate, diary);
+			if (currentRequestId !== loadRequestId) return;
+			const updatedCache = getCachedContent(targetDate);
+			content = updatedCache?.content || '';
+		} catch (error) {
+			console.error('Failed to load diary:', error);
+			// If fetch fails but we have cache, use it
+			if (cached) {
+				content = cached.content;
+			}
+		}
 		loading = false;
+	}
+
+	// Background refresh without blocking UI
+	async function refreshInBackground(targetDate: string, requestId: number) {
+		try {
+			const diary = await getDiaryByDate(targetDate);
+			if (requestId !== loadRequestId) return;
+			updateFromServer(targetDate, diary);
+			// Update content if server has newer data and we're still on same date
+			if (requestId === loadRequestId) {
+				const updatedCache = getCachedContent(targetDate);
+				if (updatedCache && !updatedCache.isDirty) {
+					content = updatedCache.content;
+				}
+			}
+		} catch (error) {
+			// Silent fail for background refresh - we already have cache
+			console.debug('Background refresh failed:', error);
+		}
 	}
 
 	function handleContentChange(newContent: string) {
@@ -103,9 +152,14 @@
 			goto('/login');
 			return;
 		}
+
+		// Initialize diary cache (includes online status)
+		initDiaryCache();
+
 		window.addEventListener('keydown', handleKeyboard);
 		return () => {
 			window.removeEventListener('keydown', handleKeyboard);
+			// Note: Don't cleanup diaryCache here as it's shared across pages
 		};
 	});
 
@@ -219,21 +273,29 @@
 							</svg>
 						</button>
 
-						<div class="flex items-center" title={isAnySyncing ? 'Syncing...' : currentDateIsDirty ? 'Unsaved' : 'Synced'}>
-							{#if isAnySyncing}
+						<button
+							on:click={handleManualSave}
+							class="flex items-center p-1.5 hover:bg-muted/50 rounded-lg transition-all duration-200"
+							title={!$onlineState.isOnline ? 'Offline - changes saved locally' : isAnySyncing ? 'Syncing...' : currentDateIsDirty ? 'Click to save now' : 'All changes saved'}
+						>
+							{#if !$onlineState.isOnline}
+								<svg class="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636a9 9 0 010 12.728m0 0l-2.829-2.829m2.829 2.829L21 21M15.536 8.464a5 5 0 010 7.072m0 0l-2.829-2.829m-4.243 2.829a4.978 4.978 0 01-1.414-2.83m-1.414 5.658a9 9 0 01-2.167-9.238m7.824 2.167a1 1 0 111.414 1.414m-1.414-1.414L3 3"></path>
+								</svg>
+							{:else if isAnySyncing}
 								<svg class="w-4 h-4 text-yellow-500 animate-spin" fill="none" viewBox="0 0 24 24">
 									<circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.5" stroke-dasharray="40 20" stroke-linecap="round"></circle>
 								</svg>
 							{:else if currentDateIsDirty}
 								<svg class="w-4 h-4 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 4H6a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2V7.828a2 2 0 00-.586-1.414l-1.828-1.828A2 2 0 0016.172 4H15M8 4v4h6V4M8 4h6m-6 0H8m8 12a2 2 0 11-4 0 2 2 0 014 0z"></path>
 								</svg>
 							{:else}
 								<svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
 								</svg>
 							{/if}
-						</div>
+						</button>
 					</div>
 				</div>
 			</div>
