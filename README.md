@@ -14,6 +14,16 @@
 
 **Diarum** (Chinese: 吾身) - A simple, elegant, and self-hosted diary application built with PocketBase and modern web technologies.
 
+### Online Demo
+
+Try Diarum without installation:
+
+🌐 **Demo Site**: https://demo.diarum.app/
+
+📝 **Demo Account**:
+- Username: `demo`
+- Password: `demo@1234`
+
 ### Screenshots
 
 | Desktop Light | Desktop Dark |
@@ -183,6 +193,16 @@ Access the PocketBase admin panel at `http://localhost:8090/_/` to:
  - 等等
 
 基于 PocketBase 和现代 Web 技术构建，简洁、优雅、可自托管。
+
+### 在线演示
+
+无需安装即可体验 Diarum：
+
+🌐 **演示站点**: https://demo.diarum.app/
+
+📝 **演示账户**:
+- 用户名: `demo`
+- 密码: `demo@1234`
 
 开发这款软件的初衷源自自己对日记的需求。现在市面上已经有很多优秀的日记和笔记软件。但都多少有点无法满足自己的需求。我期望的一个日记软件，是打开后立刻可以开始记录，不需要纠结文件名、标题、目录结构。最好是网页的，这样在各种设备都可以使用。我自己的设备涉及 MacBook 、HarmonyOS NEXT 、Android 、Arch Linux 、Windows 。只有网页应用能够很好的快速兼容这些平台。最好是可以很方便的自托管的，确保我自己对数据的掌控，且方便搬家。
 
