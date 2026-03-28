@@ -29,8 +29,6 @@
 		cleanupDiaryCache
 	} from '$lib/stores/diaryCache';
 	import { onlineState } from '$lib/stores/onlineStatus';
-	import { isInCacheRange } from '$lib/stores/persistence';
-	import { getConfig } from '$lib/stores/syncConfig';
 
 	let content = '';
 	let loading = true;
@@ -42,6 +40,8 @@
 	// Snapshot taken on mousedown (before blur clears selectedContent)
 	let shareSelectedContent = '';
 	let shareOpenedByMouse = false;
+	let date = getToday();
+	let cacheReady = false;
 
 	function captureShareSelection() {
 		shareSelectedContent = selectedContent;
@@ -57,25 +57,25 @@
 		showShareModal = true;
 	}
 
-	$: date = $page.params.date;
+	$: date = $page.params.date ?? getToday();
 	$: canGoNext = !isToday(date);
 	$: currentDateIsDirty = date ? $diaryCache[date]?.isDirty || false : false;
 	$: isAnySyncing = $syncState.isSyncing;
 
 	function goToPreviousDay() {
-		const prevDate = getPreviousDay($page.params.date);
+		const prevDate = getPreviousDay(date);
 		goto(`/diary/${prevDate}`);
 	}
 
 	function goToNextDay() {
-		const currentDate = $page.params.date;
+		const currentDate = date;
 		if (isToday(currentDate)) return;
 		const nextDate = getNextDay(currentDate);
 		goto(`/diary/${nextDate}`);
 	}
 
 	function goToToday() {
-		if (isToday($page.params.date)) return;
+		if (isToday(date)) return;
 		goto(`/diary/${getToday()}`);
 	}
 
@@ -86,67 +86,32 @@
 	async function loadDiary(targetDate: string) {
 		const currentRequestId = ++loadRequestId;
 		const cached = getCachedContent(targetDate);
-		const config = getConfig();
-		const inCacheRange = isInCacheRange(targetDate, config.cacheDays);
 
-		// If we have cache, use it immediately
-		if (cached) {
+		// Keep unsynced local draft and skip server fetch.
+		if (cached?.isDirty) {
 			content = cached.content;
-			// If dirty, don't fetch from server at all
-			if (cached.isDirty) {
-				loading = false;
-				return;
-			}
-			// If in cache range and have valid cache, show content immediately
-			// and optionally refresh in background
-			if (inCacheRange) {
-				loading = false;
-				// Background refresh only if online
-				if ($onlineState.isOnline) {
-					refreshInBackground(targetDate, currentRequestId);
-				}
-				return;
-			}
-		} else {
-			content = '';
+			loading = false;
+			return;
 		}
 
-		// No cache or outside cache range - need to fetch
+		content = '';
+
+		// Browser cache is disabled; fetch current content from server.
 		loading = true;
 		try {
 			const diary = await getDiaryByDate(targetDate);
 			if (currentRequestId !== loadRequestId) return;
 			updateFromServer(targetDate, diary);
 			if (currentRequestId !== loadRequestId) return;
-			const updatedCache = getCachedContent(targetDate);
-			content = updatedCache?.content || '';
+			content = diary?.content || '';
 		} catch (error) {
 			console.error('Failed to load diary:', error);
-			// If fetch fails but we have cache, use it
-			if (cached) {
+			// Keep local draft on fetch failure if one exists.
+			if (cached?.isDirty) {
 				content = cached.content;
 			}
 		}
 		loading = false;
-	}
-
-	// Background refresh without blocking UI
-	async function refreshInBackground(targetDate: string, requestId: number) {
-		try {
-			const diary = await getDiaryByDate(targetDate);
-			if (requestId !== loadRequestId) return;
-			updateFromServer(targetDate, diary);
-			// Update content if server has newer data and we're still on same date
-			if (requestId === loadRequestId) {
-				const updatedCache = getCachedContent(targetDate);
-				if (updatedCache && !updatedCache.isDirty) {
-					content = updatedCache.content;
-				}
-			}
-		} catch (error) {
-			// Silent fail for background refresh - we already have cache
-			console.debug('Background refresh failed:', error);
-		}
 	}
 
 	function handleContentChange(newContent: string) {
@@ -175,6 +140,7 @@
 
 		// Initialize diary cache (includes online status)
 		initDiaryCache();
+		cacheReady = true;
 
 		window.addEventListener('keydown', handleKeyboard);
 		return () => {
@@ -184,7 +150,7 @@
 	});
 
 	// Load diary only in browser (not during SSR)
-	$: if (date && date !== previousDate && typeof window !== 'undefined') {
+	$: if (cacheReady && date && date !== previousDate && typeof window !== 'undefined') {
 		previousDate = date;
 		loadDiary(date);
 	}
@@ -503,8 +469,3 @@
 	onClose={() => showShareModal = false}
 />
 
-<style>
-	kbd {
-		font-family: ui-monospace, monospace;
-	}
-</style>

@@ -1,5 +1,10 @@
 import { pb, type Diary } from './client';
 
+export type DiaryByDateResult =
+	| { status: 'found'; diary: Diary }
+	| { status: 'not_found'; diary: null }
+	| { status: 'error'; diary: null };
+
 /**
  * Get diary by ID
  */
@@ -50,9 +55,9 @@ export async function getDiariesByIds(ids: string[]): Promise<Diary[]> {
 }
 
 /**
- * Get diary by date
+ * Get diary by date with status (distinguishes not found vs request errors)
  */
-export async function getDiaryByDate(date: string): Promise<Diary | null> {
+export async function getDiaryByDateResult(date: string): Promise<DiaryByDateResult> {
 	try {
 		const response = await fetch(`/api/diaries/by-date/${date}`, {
 			headers: {
@@ -60,20 +65,54 @@ export async function getDiaryByDate(date: string): Promise<Diary | null> {
 			}
 		});
 
+		if (response.status === 404) {
+			return { status: 'not_found', diary: null };
+		}
+
 		if (!response.ok) {
-			return null;
+			console.error(`Error fetching diary: HTTP ${response.status}`);
+			return { status: 'error', diary: null };
 		}
 
 		const data = await response.json();
-		return data.exists ? data : null;
+		if (!data.exists) {
+			return { status: 'not_found', diary: null };
+		}
+
+		return { status: 'found', diary: data as Diary };
 	} catch (error) {
 		console.error('Error fetching diary:', error);
-		return null;
+		return { status: 'error', diary: null };
 	}
 }
 
 /**
- * Create or update diary
+ * Get diary by date
+ */
+export async function getDiaryByDate(date: string): Promise<Diary | null> {
+	const result = await getDiaryByDateResult(date);
+	return result.status === 'found' ? result.diary : null;
+}
+
+/**
+ * Check if content is effectively empty (strips HTML tags and whitespace)
+ */
+function isContentEmpty(content: string | undefined | null): boolean {
+	if (!content) return true;
+
+	const normalized = content.replace(/&nbsp;|&#160;/gi, ' ').trim();
+	if (!normalized) return true;
+
+	// Treat media/embedded elements as meaningful content even without plain text.
+	if (/<(img|video|audio|iframe|embed|object|svg|canvas)\b[^>]*>/i.test(normalized)) {
+		return false;
+	}
+
+	return normalized.replace(/<[^>]*>/g, '').trim().length === 0;
+}
+
+/**
+ * Create or update diary. Deletes the entry if all fields are empty.
  */
 export async function saveDiary(diary: Partial<Diary>): Promise<boolean> {
 	try {
@@ -83,9 +122,30 @@ export async function saveDiary(diary: Partial<Diary>): Promise<boolean> {
 		}
 
 		// Use custom API to get diary by date first
-		const existing = await getDiaryByDate(diary.date!);
+		const existingResult = await getDiaryByDateResult(diary.date!);
+		if (existingResult.status === 'error') {
+			// Fail closed when existence check fails to avoid false "saved" states.
+			return false;
+		}
+		const existing = existingResult.diary;
+
+		// Use effective values: incoming value takes precedence, fall back to existing record.
+		// This prevents accidentally deleting an entry when only content is synced
+		// but mood/weather still have values on the server.
+		const effectiveContent = diary.content !== undefined ? diary.content : existing?.content;
+		const effectiveMood = diary.mood !== undefined ? diary.mood : existing?.mood;
+		const effectiveWeather = diary.weather !== undefined ? diary.weather : existing?.weather;
+
+		const allEmpty =
+			isContentEmpty(effectiveContent) &&
+			!effectiveMood?.trim() &&
+			!effectiveWeather?.trim();
 
 		if (existing && existing.id) {
+			if (allEmpty) {
+				// All fields are empty — delete the entry instead of saving a blank record
+				return deleteDiary(existing.id);
+			}
 			// Update existing diary
 			await pb.collection('diaries').update(existing.id, {
 				content: diary.content,
@@ -93,6 +153,10 @@ export async function saveDiary(diary: Partial<Diary>): Promise<boolean> {
 				weather: diary.weather
 			});
 		} else {
+			if (allEmpty) {
+				// Nothing to save — skip creating an empty entry
+				return true;
+			}
 			// Create new diary
 			const data: any = {
 				date: diary.date + ' 00:00:00.000Z', // Use full timestamp format

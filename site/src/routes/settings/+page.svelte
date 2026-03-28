@@ -10,7 +10,6 @@
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Footer from '$lib/components/ui/Footer.svelte';
 	import SettingsToc from '$lib/components/ui/SettingsToc.svelte';
-	import SyncSettings from '$lib/components/ui/SyncSettings.svelte';
 
 	// TOC state
 	let showMobileToc = false;
@@ -357,7 +356,8 @@
 		importing = false;
 	}
 
-	onMount(async () => {
+	onMount(() => {
+		const initialize = async () => {
 		if (!$isAuthenticated) {
 			goto('/login');
 			return;
@@ -375,6 +375,9 @@
 		if (aiSettings.enabled) {
 			await loadVectorStats();
 		}
+		};
+
+		void initialize();
 
 		return () => {
 			window.removeEventListener('resize', checkMobile);
@@ -456,11 +459,12 @@
 						<button
 							on:click={handleToggle}
 							disabled={toggling}
+							aria-label="Toggle API access"
 							class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 {tokenStatus.enabled ? 'bg-primary' : 'bg-muted'}"
 						>
 							<span
 								class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 {tokenStatus.enabled ? 'translate-x-6' : 'translate-x-1'}"
-							/>
+							></span>
 						</button>
 					</div>
 
@@ -549,8 +553,9 @@ curl "{getBaseUrl()}/api/v1/diaries?token={tokenStatus.token}&date={new Date().t
 
 					<!-- API Key -->
 					<div class="py-4 border-b border-border/50">
-						<label class="block font-medium text-foreground mb-2">API Key</label>
+						<label for="ai-api-key" class="block font-medium text-foreground mb-2">API Key</label>
 						<input
+							id="ai-api-key"
 							type="password"
 							bind:value={aiSettings.api_key}
 							placeholder="sk-..."
@@ -561,8 +566,9 @@ curl "{getBaseUrl()}/api/v1/diaries?token={tokenStatus.token}&date={new Date().t
 
 					<!-- Base URL -->
 					<div class="py-4 border-b border-border/50">
-						<label class="block font-medium text-foreground mb-2">API Base URL</label>
+						<label for="ai-base-url" class="block font-medium text-foreground mb-2">API Base URL</label>
 						<input
+							id="ai-base-url"
 							type="text"
 							bind:value={aiSettings.base_url}
 							placeholder="https://api.openai.com"
@@ -579,9 +585,10 @@ curl "{getBaseUrl()}/api/v1/diaries?token={tokenStatus.token}&date={new Date().t
 
 					<!-- Chat Model -->
 					<div class="py-4 border-b border-border/50">
-						<label class="block font-medium text-foreground mb-2">Chat Model</label>
+						<label for="ai-chat-model" class="block font-medium text-foreground mb-2">Chat Model</label>
 						<div class="flex items-center gap-2">
 							<select
+								id="ai-chat-model"
 								bind:value={aiSettings.chat_model}
 								class="flex-1 px-3 py-2 bg-muted rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
 							>
@@ -606,9 +613,10 @@ curl "{getBaseUrl()}/api/v1/diaries?token={tokenStatus.token}&date={new Date().t
 
 					<!-- Embedding Model -->
 					<div class="py-4 border-b border-border/50">
-						<label class="block font-medium text-foreground mb-2">Embedding Model</label>
+						<label for="ai-embedding-model" class="block font-medium text-foreground mb-2">Embedding Model</label>
 						<div class="flex items-center gap-2">
 							<select
+								id="ai-embedding-model"
 								bind:value={aiSettings.embedding_model}
 								class="flex-1 px-3 py-2 bg-muted rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
 							>
@@ -649,11 +657,12 @@ curl "{getBaseUrl()}/api/v1/diaries?token={tokenStatus.token}&date={new Date().t
 							<button
 								on:click={() => { if (canEnableAI) aiSettings.enabled = !aiSettings.enabled; }}
 								disabled={!canEnableAI && !aiSettings.enabled}
+								aria-label="Toggle AI features"
 								class="relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 {aiSettings.enabled ? 'bg-primary' : 'bg-muted'} {!canEnableAI && !aiSettings.enabled ? 'opacity-50 cursor-not-allowed' : ''}"
 							>
 								<span
 									class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 {aiSettings.enabled ? 'translate-x-6' : 'translate-x-1'}"
-								/>
+								></span>
 							</button>
 						</div>
 					</div>
@@ -868,8 +877,9 @@ curl "{getBaseUrl()}/api/v1/diaries?token={tokenStatus.token}&date={new Date().t
 
 					<!-- Domain -->
 					<div class="py-4 border-b border-border/50">
-						<label class="block font-medium text-foreground mb-2">Domain</label>
+						<label for="chevereto-domain" class="block font-medium text-foreground mb-2">Domain</label>
 						<input
+							id="chevereto-domain"
 							type="text"
 							bind:value={cheveretoSettingsLocal.domain}
 							placeholder="https://img.example.com"
@@ -880,8 +890,9 @@ curl "{getBaseUrl()}/api/v1/diaries?token={tokenStatus.token}&date={new Date().t
 
 					<!-- API Key -->
 					<div class="py-4 border-b border-border/50">
-						<label class="block font-medium text-foreground mb-2">API Key</label>
+						<label for="chevereto-api-key" class="block font-medium text-foreground mb-2">API Key</label>
 						<input
+							id="chevereto-api-key"
 							type="password"
 							bind:value={cheveretoSettingsLocal.api_key}
 							placeholder="chv-key-..."
@@ -892,8 +903,9 @@ curl "{getBaseUrl()}/api/v1/diaries?token={tokenStatus.token}&date={new Date().t
 
 					<!-- Album ID -->
 					<div class="py-4 border-b border-border/50">
-						<label class="block font-medium text-foreground mb-2">Album ID (optional)</label>
+						<label for="chevereto-album-id" class="block font-medium text-foreground mb-2">Album ID (optional)</label>
 						<input
+							id="chevereto-album-id"
 							type="text"
 							bind:value={cheveretoSettingsLocal.album_id}
 							placeholder=""
@@ -950,11 +962,12 @@ curl "{getBaseUrl()}/api/v1/diaries?token={tokenStatus.token}&date={new Date().t
 							<button
 								on:click={() => { if (canEnableChevereto) cheveretoSettingsLocal.enabled = !cheveretoSettingsLocal.enabled; }}
 								disabled={!canEnableChevereto && !cheveretoSettingsLocal.enabled}
+								aria-label="Toggle Chevereto integration"
 								class="relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 {cheveretoSettingsLocal.enabled ? 'bg-primary' : 'bg-muted'} {!canEnableChevereto && !cheveretoSettingsLocal.enabled ? 'opacity-50 cursor-not-allowed' : ''}"
 							>
 								<span
 									class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 {cheveretoSettingsLocal.enabled ? 'translate-x-6' : 'translate-x-1'}"
-								/>
+								></span>
 							</button>
 						</div>
 						<p class="text-xs text-muted-foreground mt-3">
@@ -990,15 +1003,6 @@ curl "{getBaseUrl()}/api/v1/diaries?token={tokenStatus.token}&date={new Date().t
 					</div>
 				</div>
 
-				<!-- Sync & Cache Section -->
-				<div id="sync-cache" class="bg-card rounded-xl shadow-sm border border-border/50 p-6 animate-fade-in scroll-mt-16">
-					<h2 class="text-lg font-semibold text-foreground mb-4">Sync & Cache</h2>
-					<p class="text-sm text-muted-foreground mb-6">
-						Manage offline sync and local cache settings. Your diary entries are automatically saved locally and synced when online.
-					</p>
-					<SyncSettings />
-				</div>
-
 				<!-- Data Management Section -->
 				<div id="data-management" class="bg-card rounded-xl shadow-sm border border-border/50 p-6 animate-fade-in scroll-mt-16">
 					<h2 class="text-lg font-semibold text-foreground mb-4">Data Management</h2>
@@ -1027,8 +1031,9 @@ curl "{getBaseUrl()}/api/v1/diaries?token={tokenStatus.token}&date={new Date().t
 
 								<!-- Date Range -->
 								<div>
-									<label class="block text-sm font-medium text-foreground mb-2">Date Range</label>
+									<label for="export-date-range" class="block text-sm font-medium text-foreground mb-2">Date Range</label>
 									<select
+										id="export-date-range"
 										bind:value={exportOptions.date_range}
 										class="w-full px-3 py-2 bg-background rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary border border-border/50"
 									>
@@ -1044,16 +1049,18 @@ curl "{getBaseUrl()}/api/v1/diaries?token={tokenStatus.token}&date={new Date().t
 								{#if exportOptions.date_range === 'custom'}
 									<div class="grid grid-cols-2 gap-3">
 										<div>
-											<label class="block text-xs text-muted-foreground mb-1">Start Date</label>
+											<label for="export-start-date" class="block text-xs text-muted-foreground mb-1">Start Date</label>
 											<input
+												id="export-start-date"
 												type="date"
 												bind:value={customStartDate}
 												class="w-full px-3 py-2 bg-background rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary border border-border/50"
 											/>
 										</div>
 										<div>
-											<label class="block text-xs text-muted-foreground mb-1">End Date</label>
+											<label for="export-end-date" class="block text-xs text-muted-foreground mb-1">End Date</label>
 											<input
+												id="export-end-date"
 												type="date"
 												bind:value={customEndDate}
 												class="w-full px-3 py-2 bg-background rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary border border-border/50"
@@ -1064,7 +1071,7 @@ curl "{getBaseUrl()}/api/v1/diaries?token={tokenStatus.token}&date={new Date().t
 
 								<!-- Content Types -->
 								<div>
-									<label class="block text-sm font-medium text-foreground mb-2">Content to Export</label>
+									<div class="block text-sm font-medium text-foreground mb-2">Content to Export</div>
 									<div class="space-y-2">
 										<label class="flex items-center gap-2 cursor-pointer">
 											<input type="checkbox" bind:checked={exportOptions.include_diaries} class="rounded" />
