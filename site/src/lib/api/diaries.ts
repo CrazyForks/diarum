@@ -5,6 +5,12 @@ export type DiaryByDateResult =
 	| { status: 'not_found'; diary: null }
 	| { status: 'error'; diary: null };
 
+export interface CalendarDiaryMeta {
+	date: string;
+	mood?: string;
+	weather?: string;
+}
+
 /**
  * Get diary by ID
  */
@@ -181,7 +187,7 @@ export async function saveDiary(diary: Partial<Diary>): Promise<boolean> {
 /**
  * Get dates with diaries in range
  */
-export async function getDatesWithDiaries(start: string, end: string): Promise<string[]> {
+export async function getDatesWithDiaries(start: string, end: string): Promise<CalendarDiaryMeta[]> {
 	try {
 		const response = await fetch(`/api/diaries/exists?start=${start}&end=${end}`, {
 			headers: {
@@ -194,7 +200,41 @@ export async function getDatesWithDiaries(start: string, end: string): Promise<s
 		}
 
 		const data = await response.json();
-		return data.dates || [];
+		if (Array.isArray(data.entries)) {
+			return data.entries.map((entry: any) => ({
+				date: entry.date,
+				mood: entry.mood || '',
+				weather: entry.weather || ''
+			}));
+		}
+
+		// Backward compatibility for older API responses.
+		// If custom API doesn't return entries metadata yet, fetch full records directly.
+		if (Array.isArray(data.dates) && data.dates.length > 0) {
+			try {
+				const startTime = `${start} 00:00:00.000Z`;
+				const endTime = `${end} 23:59:59.999Z`;
+				const records = await pb.collection('diaries').getFullList({
+					filter: `date >= \"${startTime}\" && date <= \"${endTime}\"`,
+					fields: 'date,mood,weather',
+					sort: '-date'
+				});
+
+				return records.map((record: any) => ({
+					date: (record.date || '').split(' ')[0],
+					mood: record.mood || '',
+					weather: record.weather || ''
+				}));
+			} catch (fallbackError) {
+				console.error('Error fetching diary metadata fallback:', fallbackError);
+			}
+		}
+
+		if (Array.isArray(data.dates)) {
+			return data.dates.map((date: string) => ({ date, mood: '', weather: '' }));
+		}
+
+		return [];
 	} catch (error) {
 		console.error('Error fetching diary dates:', error);
 		return [];

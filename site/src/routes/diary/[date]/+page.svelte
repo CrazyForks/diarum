@@ -8,6 +8,7 @@
 	import DiaryShareModal from '$lib/components/share/DiaryShareModal.svelte';
 	import { getDiaryByDate } from '$lib/api/diaries';
 	import { isAuthenticated } from '$lib/api/client';
+	import { getDiaryEmojiSettings } from '$lib/api/settings';
 	import {
 		formatDisplayDate,
 		formatShortDate,
@@ -29,6 +30,10 @@
 		cleanupDiaryCache
 	} from '$lib/stores/diaryCache';
 	import { onlineState } from '$lib/stores/onlineStatus';
+	import { DEFAULT_MOOD_OPTIONS, DEFAULT_WEATHER_OPTIONS } from '$lib/utils/diaryEmoji';
+
+	let moodPresets: string[] = [...DEFAULT_MOOD_OPTIONS];
+	let weatherPresets: string[] = [...DEFAULT_WEATHER_OPTIONS];
 
 	let content = '';
 	let loading = true;
@@ -37,6 +42,8 @@
 	let showDesktopToc = true;
 	let showShareModal = false;
 	let selectedContent = '';
+	let selectedMood = '';
+	let selectedWeather = '';
 	// Snapshot taken on mousedown (before blur clears selectedContent)
 	let shareSelectedContent = '';
 	let shareOpenedByMouse = false;
@@ -74,11 +81,6 @@
 		goto(`/diary/${nextDate}`);
 	}
 
-	function goToToday() {
-		if (isToday(date)) return;
-		goto(`/diary/${getToday()}`);
-	}
-
 	function goToCalendar() {
 		goto('/diary');
 	}
@@ -90,11 +92,15 @@
 		// Keep unsynced local draft and skip server fetch.
 		if (cached?.isDirty) {
 			content = cached.content;
+			selectedMood = cached.mood || '';
+			selectedWeather = cached.weather || '';
 			loading = false;
 			return;
 		}
 
 		content = '';
+		selectedMood = '';
+		selectedWeather = '';
 
 		// Browser cache is disabled; fetch current content from server.
 		loading = true;
@@ -104,19 +110,55 @@
 			updateFromServer(targetDate, diary);
 			if (currentRequestId !== loadRequestId) return;
 			content = diary?.content || '';
+			selectedMood = diary?.mood || '';
+			selectedWeather = diary?.weather || '';
 		} catch (error) {
 			console.error('Failed to load diary:', error);
 			// Keep local draft on fetch failure if one exists.
 			if (cached?.isDirty) {
 				content = cached.content;
+				selectedMood = cached.mood || '';
+				selectedWeather = cached.weather || '';
 			}
 		}
 		loading = false;
 	}
 
+	async function loadDiaryEmojiPresets() {
+		try {
+			const settings = await getDiaryEmojiSettings();
+			moodPresets = [...settings.mood_options];
+			weatherPresets = [...settings.weather_options];
+		} catch (error) {
+			console.error('Failed to load mood/weather presets:', error);
+		}
+	}
+
 	function handleContentChange(newContent: string) {
 		content = newContent;
-		updateLocalCache(date, newContent);
+		updateLocalCache(date, {
+			content,
+			mood: selectedMood,
+			weather: selectedWeather
+		});
+	}
+
+	function handleMoodSelect(emoji: string) {
+		selectedMood = selectedMood === emoji ? '' : emoji;
+		updateLocalCache(date, {
+			content,
+			mood: selectedMood,
+			weather: selectedWeather
+		});
+	}
+
+	function handleWeatherSelect(emoji: string) {
+		selectedWeather = selectedWeather === emoji ? '' : emoji;
+		updateLocalCache(date, {
+			content,
+			mood: selectedMood,
+			weather: selectedWeather
+		});
 	}
 
 	async function handleManualSave() {
@@ -141,6 +183,7 @@
 		// Initialize diary cache (includes online status)
 		initDiaryCache();
 		cacheReady = true;
+		void loadDiaryEmojiPresets();
 
 		window.addEventListener('keydown', handleKeyboard);
 		return () => {
@@ -221,15 +264,6 @@
 
 					<!-- Right: Actions -->
 					<div class="flex items-center gap-2">
-						{#if !isToday(date)}
-							<button
-								on:click={goToToday}
-								class="px-2 py-1 text-xs bg-primary text-primary-foreground rounded-md hover:opacity-90 transition-all duration-200"
-							>
-								Today
-							</button>
-						{/if}
-
 						<a href="/assistant" class="hidden sm:block p-1.5 hover:bg-muted/50 rounded-lg transition-all duration-200" title="AI Assistant">
 							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								<rect x="4" y="6" width="16" height="12" rx="2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -326,16 +360,74 @@
 				{/if}
 			</main>
 
-			<!-- Desktop TOC Sidebar -->
-			{#if showDesktopToc}
-				<aside class="hidden lg:block w-56 flex-shrink-0">
-					<div class="sticky top-11 animate-slide-in-right">
+			<!-- Desktop Right Sidebar -->
+			<aside class="hidden lg:block w-[19rem] flex-shrink-0">
+				<div class="sticky top-11 space-y-3 animate-slide-in-right">
+					<div class="rounded-2xl border border-orange-500/25 bg-gradient-to-br from-orange-50/80 via-card to-rose-100/60 dark:from-orange-950/20 dark:via-card dark:to-rose-950/10 p-4 shadow-sm">
+						<div class="flex items-center justify-between mb-2">
+							<div>
+								<div class="text-xs uppercase tracking-[0.14em] text-muted-foreground">Today's mood</div>
+								<div class="text-sm font-semibold text-foreground">How are you feeling?</div>
+							</div>
+							{#if selectedMood}
+								<button
+									on:click={() => handleMoodSelect(selectedMood)}
+									class="text-[11px] px-2 py-1 rounded-full bg-background/70 hover:bg-background border border-border/70 transition-colors"
+								>
+									Clear
+								</button>
+							{/if}
+						</div>
+						<div class="grid grid-cols-4 gap-2">
+							{#each moodPresets as option}
+								<button
+									on:click={() => handleMoodSelect(option)}
+									class="emoji-option {selectedMood === option ? 'emoji-option-active' : ''}"
+									title={option}
+									aria-label={`Mood ${option}`}
+								>
+									<span class="text-xl leading-none">{option}</span>
+								</button>
+							{/each}
+						</div>
+					</div>
+
+					<div class="rounded-2xl border border-cyan-500/25 bg-gradient-to-br from-cyan-50/80 via-card to-blue-100/60 dark:from-cyan-950/20 dark:via-card dark:to-blue-950/10 p-4 shadow-sm">
+						<div class="flex items-center justify-between mb-2">
+							<div>
+								<div class="text-xs uppercase tracking-[0.14em] text-muted-foreground">Today's weather</div>
+								<div class="text-sm font-semibold text-foreground">What's outside?</div>
+							</div>
+							{#if selectedWeather}
+								<button
+									on:click={() => handleWeatherSelect(selectedWeather)}
+									class="text-[11px] px-2 py-1 rounded-full bg-background/70 hover:bg-background border border-border/70 transition-colors"
+								>
+									Clear
+								</button>
+							{/if}
+						</div>
+						<div class="grid grid-cols-4 gap-2">
+							{#each weatherPresets as option}
+								<button
+									on:click={() => handleWeatherSelect(option)}
+									class="emoji-option {selectedWeather === option ? 'emoji-option-active' : ''}"
+									title={option}
+									aria-label={`Weather ${option}`}
+								>
+									<span class="text-xl leading-none">{option}</span>
+								</button>
+							{/each}
+						</div>
+					</div>
+
+					{#if showDesktopToc}
 						<div class="bg-card/50 rounded-xl border border-border/50 p-4">
 							<TableOfContents {content} />
 						</div>
-					</div>
-				</aside>
-			{/if}
+					{/if}
+				</div>
+			</aside>
 		</div>
 	</div>
 
@@ -452,6 +544,41 @@
 			<!-- Divider -->
 			<div class="mx-3 border-t border-border/50"></div>
 
+			<!-- Mood & Weather -->
+			<div class="px-3 py-3 space-y-3 border-b border-border/50">
+				<div>
+					<div class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2 px-1">Mood</div>
+					<div class="grid grid-cols-4 gap-1.5">
+						{#each moodPresets as option}
+							<button
+								on:click={() => handleMoodSelect(option)}
+								class="emoji-option {selectedMood === option ? 'emoji-option-active' : ''}"
+								title={option}
+								aria-label={`Mood ${option}`}
+							>
+								<span class="text-lg">{option}</span>
+							</button>
+						{/each}
+					</div>
+				</div>
+
+				<div>
+					<div class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2 px-1">Weather</div>
+					<div class="grid grid-cols-4 gap-1.5">
+						{#each weatherPresets as option}
+							<button
+								on:click={() => handleWeatherSelect(option)}
+								class="emoji-option {selectedWeather === option ? 'emoji-option-active' : ''}"
+								title={option}
+								aria-label={`Weather ${option}`}
+							>
+								<span class="text-lg">{option}</span>
+							</button>
+						{/each}
+					</div>
+				</div>
+			</div>
+
 			<!-- TOC Section -->
 			<div class="flex-1 overflow-y-auto px-3 py-3">
 				<TableOfContents {content} onNavigate={() => showDrawer = false} />
@@ -468,4 +595,29 @@
 	selectedContent={shareSelectedContent}
 	onClose={() => showShareModal = false}
 />
+
+<style>
+	.emoji-option {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0.5rem;
+		border-radius: 0.8rem;
+		border: 1px solid hsl(var(--border) / 0.6);
+		background: hsl(var(--background) / 0.72);
+		transition: transform 0.18s ease, border-color 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease;
+	}
+
+	.emoji-option:hover {
+		transform: translateY(-1px);
+		background: hsl(var(--muted) / 0.65);
+		border-color: hsl(var(--primary) / 0.3);
+	}
+
+	.emoji-option-active {
+		border-color: hsl(var(--primary) / 0.65);
+		background: hsl(var(--primary) / 0.12);
+		box-shadow: 0 8px 16px hsl(var(--primary) / 0.12);
+	}
+</style>
 

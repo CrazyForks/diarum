@@ -2,24 +2,61 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { isAuthenticated } from '$lib/api/client';
-	import { getApiToken, toggleApiToken, resetApiToken, type ApiTokenStatus } from '$lib/api/settings';
+	import {
+		getApiToken,
+		toggleApiToken,
+		resetApiToken,
+		getDiaryEmojiSettings,
+		saveDiaryEmojiSettings,
+		type ApiTokenStatus
+	} from '$lib/api/settings';
 	import { getAISettings, saveAISettings, fetchModels, buildVectors, buildVectorsIncremental, getVectorStats, type AISettings, type ModelInfo, type BuildVectorsResult, type VectorStats } from '$lib/api/ai';
 	import { exportDiaries, importDiaries, type ExportStats, type ImportStats, type ExportOptions } from '$lib/api/exportImport';
 	import { getCheveretoSettings, saveCheveretoSettings, testCheveretoConnection, type CheveretoSettings } from '$lib/api/chevereto';
-	import { cheveretoSettings as cheveretoStore, loadCheveretoSettings } from '$lib/stores/chevereto';
-	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import { loadCheveretoSettings } from '$lib/stores/chevereto';
 	import Footer from '$lib/components/ui/Footer.svelte';
-	import SettingsToc from '$lib/components/ui/SettingsToc.svelte';
+	import {
+		DEFAULT_MOOD_OPTIONS,
+		DEFAULT_WEATHER_OPTIONS,
+		MAX_DIARY_EMOJI_OPTION_COUNT,
+		MAX_DIARY_EMOJI_OPTION_LENGTH,
+		countDisplayChars,
+		sanitizeMoodOptions,
+		sanitizeWeatherOptions
+	} from '$lib/utils/diaryEmoji';
 
-	// TOC state
-	let showMobileToc = false;
-	let showDesktopToc = true;
-	let isMobile = false;
+	type SettingsTab = 'api-access' | 'mood-weather' | 'ai-assistant' | 'image-upload' | 'data-management';
 
-	function checkMobile() {
-		if (typeof window !== 'undefined') {
-			isMobile = window.innerWidth < 1024;
+	const settingsTabs: { id: SettingsTab; label: string }[] = [
+		{ id: 'api-access', label: 'API Access' },
+		{ id: 'mood-weather', label: 'Mood & Weather' },
+		{ id: 'ai-assistant', label: 'AI Assistant' },
+		{ id: 'image-upload', label: 'Image Upload' },
+		{ id: 'data-management', label: 'Data Management' }
+	];
+
+	let activeTab: SettingsTab = 'api-access';
+
+	function isSettingsTab(value: string): value is SettingsTab {
+		return settingsTabs.some((tab) => tab.id === value);
+	}
+
+	function syncActiveTabFromHash() {
+		if (typeof window === 'undefined') return;
+		const hash = window.location.hash.replace('#', '');
+		if (hash && isSettingsTab(hash)) {
+			activeTab = hash;
 		}
+	}
+
+	function setActiveTab(tab: SettingsTab) {
+		activeTab = tab;
+
+		if (typeof window === 'undefined') return;
+
+		const url = new URL(window.location.href);
+		url.hash = tab;
+		history.replaceState(null, '', url);
 	}
 
 	let loading = true;
@@ -27,6 +64,22 @@
 	let copied = false;
 	let resetting = false;
 	let toggling = false;
+
+	// Diary emoji settings
+	let moodOptions: string[] = [];
+	let weatherOptions: string[] = [];
+	let originalMoodOptions: string[] = [];
+	let originalWeatherOptions: string[] = [];
+	let moodInput = '';
+	let weatherInput = '';
+	let emojiSettingsSaving = false;
+	let emojiSettingsError = '';
+	let emojiSettingsSuccess = '';
+	type EmojiListType = 'mood' | 'weather';
+	let draggingType: EmojiListType | null = null;
+	let draggingIndex: number | null = null;
+	let dragOverType: EmojiListType | null = null;
+	let dragOverIndex: number | null = null;
 
 	// AI Settings
 	let aiSettings: AISettings = {
@@ -89,6 +142,185 @@
 
 	async function loadTokenStatus() {
 		tokenStatus = await getApiToken();
+	}
+
+	async function loadDiaryEmojiSettingsLocal() {
+		const settings = await getDiaryEmojiSettings();
+		moodOptions = [...settings.mood_options];
+		weatherOptions = [...settings.weather_options];
+		originalMoodOptions = [...settings.mood_options];
+		originalWeatherOptions = [...settings.weather_options];
+	}
+
+	function addMoodOption() {
+		emojiSettingsError = '';
+		const value = moodInput.trim();
+		if (!value) return;
+		if (moodOptions.length >= MAX_DIARY_EMOJI_OPTION_COUNT) {
+			emojiSettingsError = `You can add up to ${MAX_DIARY_EMOJI_OPTION_COUNT} mood options`;
+			return;
+		}
+		if (countDisplayChars(value) > MAX_DIARY_EMOJI_OPTION_LENGTH) {
+			emojiSettingsError = `Mood entry must be at most ${MAX_DIARY_EMOJI_OPTION_LENGTH} characters`;
+			return;
+		}
+		if (moodOptions.includes(value)) {
+			emojiSettingsError = 'Mood entry already exists';
+			return;
+		}
+		moodOptions = [...moodOptions, value];
+		moodInput = '';
+	}
+
+	function removeMoodOption(value: string) {
+		emojiSettingsError = '';
+		if (moodOptions.length <= 1) {
+			emojiSettingsError = 'Keep at least one mood option';
+			return;
+		}
+		moodOptions = moodOptions.filter((item) => item !== value);
+	}
+
+	function addWeatherOption() {
+		emojiSettingsError = '';
+		const value = weatherInput.trim();
+		if (!value) return;
+		if (weatherOptions.length >= MAX_DIARY_EMOJI_OPTION_COUNT) {
+			emojiSettingsError = `You can add up to ${MAX_DIARY_EMOJI_OPTION_COUNT} weather options`;
+			return;
+		}
+		if (countDisplayChars(value) > MAX_DIARY_EMOJI_OPTION_LENGTH) {
+			emojiSettingsError = `Weather entry must be at most ${MAX_DIARY_EMOJI_OPTION_LENGTH} characters`;
+			return;
+		}
+		if (weatherOptions.includes(value)) {
+			emojiSettingsError = 'Weather entry already exists';
+			return;
+		}
+		weatherOptions = [...weatherOptions, value];
+		weatherInput = '';
+	}
+
+	function removeWeatherOption(value: string) {
+		emojiSettingsError = '';
+		if (weatherOptions.length <= 1) {
+			emojiSettingsError = 'Keep at least one weather option';
+			return;
+		}
+		weatherOptions = weatherOptions.filter((item) => item !== value);
+	}
+
+	function restoreMoodDefaults() {
+		emojiSettingsError = '';
+		emojiSettingsSuccess = '';
+		moodOptions = [...DEFAULT_MOOD_OPTIONS];
+	}
+
+	function restoreWeatherDefaults() {
+		emojiSettingsError = '';
+		emojiSettingsSuccess = '';
+		weatherOptions = [...DEFAULT_WEATHER_OPTIONS];
+	}
+
+	function restoreAllDefaults() {
+		emojiSettingsError = '';
+		emojiSettingsSuccess = '';
+		moodOptions = [...DEFAULT_MOOD_OPTIONS];
+		weatherOptions = [...DEFAULT_WEATHER_OPTIONS];
+	}
+
+	function reorderOptions(options: string[], fromIndex: number, toIndex: number): string[] {
+		if (fromIndex === toIndex) return options;
+		const next = [...options];
+		const [moved] = next.splice(fromIndex, 1);
+		next.splice(toIndex, 0, moved);
+		return next;
+	}
+
+	function handleDragStart(type: EmojiListType, index: number) {
+		draggingType = type;
+		draggingIndex = index;
+		dragOverType = type;
+		dragOverIndex = index;
+	}
+
+	function handleDragOver(event: DragEvent, type: EmojiListType, index: number) {
+		event.preventDefault();
+		if (draggingType !== type) return;
+		dragOverType = type;
+		dragOverIndex = index;
+	}
+
+	function handleDrop(type: EmojiListType, index: number) {
+		if (draggingType !== type || draggingIndex === null) {
+			clearDragState();
+			return;
+		}
+
+		emojiSettingsError = '';
+		emojiSettingsSuccess = '';
+		if (type === 'mood') {
+			moodOptions = reorderOptions(moodOptions, draggingIndex, index);
+		} else {
+			weatherOptions = reorderOptions(weatherOptions, draggingIndex, index);
+		}
+
+		clearDragState();
+	}
+
+	function handleDropToEnd(type: EmojiListType) {
+		if (draggingType !== type || draggingIndex === null) {
+			clearDragState();
+			return;
+		}
+
+		emojiSettingsError = '';
+		emojiSettingsSuccess = '';
+		if (type === 'mood') {
+			moodOptions = reorderOptions(moodOptions, draggingIndex, moodOptions.length - 1);
+		} else {
+			weatherOptions = reorderOptions(weatherOptions, draggingIndex, weatherOptions.length - 1);
+		}
+
+		clearDragState();
+	}
+
+	function clearDragState() {
+		draggingType = null;
+		draggingIndex = null;
+		dragOverType = null;
+		dragOverIndex = null;
+	}
+
+	async function handleSaveEmojiSettings() {
+		emojiSettingsError = '';
+		emojiSettingsSuccess = '';
+
+		if (moodOptions.length < 1 || weatherOptions.length < 1) {
+			emojiSettingsError = 'Mood and weather must each keep at least one option';
+			return;
+		}
+
+		emojiSettingsSaving = true;
+		try {
+			const sanitizedMoodOptions = sanitizeMoodOptions(moodOptions);
+			const sanitizedWeatherOptions = sanitizeWeatherOptions(weatherOptions);
+
+			await saveDiaryEmojiSettings({
+				mood_options: sanitizedMoodOptions,
+				weather_options: sanitizedWeatherOptions
+			});
+
+			moodOptions = [...sanitizedMoodOptions];
+			weatherOptions = [...sanitizedWeatherOptions];
+			originalMoodOptions = [...sanitizedMoodOptions];
+			originalWeatherOptions = [...sanitizedWeatherOptions];
+			emojiSettingsSuccess = 'Mood and weather options saved successfully';
+			setTimeout(() => emojiSettingsSuccess = '', 3000);
+		} catch (e) {
+			emojiSettingsError = e instanceof Error ? e.message : 'Failed to save mood/weather options';
+		}
+		emojiSettingsSaving = false;
 	}
 
 	async function handleToggle() {
@@ -224,6 +456,10 @@
 	// Check if AI can be enabled
 	$: canEnableAI = aiSettings.api_key && aiSettings.base_url && aiSettings.chat_model && aiSettings.embedding_model;
 
+	$: emojiSettingsChanged =
+		JSON.stringify(moodOptions) !== JSON.stringify(originalMoodOptions) ||
+		JSON.stringify(weatherOptions) !== JSON.stringify(originalWeatherOptions);
+
 	// Check if AI settings have changed
 	$: aiSettingsChanged = aiSettings.api_key !== originalAISettings.api_key ||
 		aiSettings.base_url !== originalAISettings.base_url ||
@@ -357,19 +593,22 @@
 	}
 
 	onMount(() => {
+		syncActiveTabFromHash();
+
+		const handleHashChange = () => {
+			syncActiveTabFromHash();
+		};
+
+		window.addEventListener('hashchange', handleHashChange);
+
 		const initialize = async () => {
 		if (!$isAuthenticated) {
 			goto('/login');
 			return;
 		}
 
-		// Initialize mobile detection
-		checkMobile();
-		showDesktopToc = !isMobile;
-		window.addEventListener('resize', checkMobile);
-
 		loading = true;
-		await Promise.all([loadTokenStatus(), loadAISettings(), loadCheveretoSettingsLocal()]);
+		await Promise.all([loadTokenStatus(), loadDiaryEmojiSettingsLocal(), loadAISettings(), loadCheveretoSettingsLocal()]);
 		loading = false;
 		// Load vector stats if AI is enabled
 		if (aiSettings.enabled) {
@@ -380,7 +619,7 @@
 		void initialize();
 
 		return () => {
-			window.removeEventListener('resize', checkMobile);
+			window.removeEventListener('hashchange', handleHashChange);
 		};
 	});
 </script>
@@ -395,34 +634,28 @@
 		<!-- Header -->
 		<header class="glass border-b border-border/50">
 			<div class="max-w-6xl mx-auto px-4 h-11">
-				<div class="flex items-center justify-between h-full">
-					<!-- Left: Brand -->
-					<a href="/" class="flex items-center gap-2 hover:opacity-80 transition-opacity">
-						<img src="/logo.png" alt="Diarum" class="w-6 h-6" />
-						<span class="hidden sm:inline text-lg font-semibold text-foreground hover:text-primary transition-colors">Diarum</span>
-					</a>
+				<div class="grid grid-cols-[auto_1fr_auto] items-center gap-2 h-full">
+					<div class="flex items-center gap-2 min-w-0">
+						<a href="/" class="flex items-center gap-2 hover:opacity-80 transition-opacity" title="Diarum Home">
+							<img src="/logo.png" alt="Diarum" class="w-6 h-6" />
+							<span class="hidden sm:inline text-lg font-semibold text-foreground hover:text-primary transition-colors">Diarum</span>
+						</a>
+					</div>
 
 					<!-- Center: Title -->
-					<div class="text-sm font-medium text-foreground">Settings</div>
+					<div class="text-sm font-medium text-foreground text-center">Settings</div>
 
 					<!-- Right: Actions -->
-					<div class="flex items-center gap-2">
-						<button
-							on:click={() => {
-								if (window.innerWidth >= 1024) {
-									showDesktopToc = !showDesktopToc;
-								} else {
-									showMobileToc = !showMobileToc;
-								}
-							}}
-							class="p-1.5 hover:bg-muted/50 rounded-lg transition-all duration-200 {(showDesktopToc || showMobileToc) ? 'bg-muted/50' : ''}"
-							title="Table of contents"
-						>
-							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
-							</svg>
-						</button>
-					</div>
+					<a
+						href="/diary"
+						class="justify-self-end p-1.5 hover:bg-muted/50 rounded-lg transition-all duration-200"
+						title="Diary"
+					>
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+								d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+						</svg>
+					</a>
 				</div>
 			</div>
 		</header>
@@ -430,9 +663,38 @@
 
 	<!-- Main Content -->
 	<div class="max-w-6xl mx-auto px-4 py-6">
-		<div class="flex gap-6 {showDesktopToc ? '' : 'justify-center'}">
-			<!-- Settings Content -->
-			<main class="flex-1 min-w-0 max-w-4xl {showDesktopToc ? 'lg:mx-0' : 'mx-auto'}">
+		<div class="flex justify-center">
+			<main class="w-full max-w-4xl">
+				<div class="mb-4 space-y-3">
+					<div class="sm:hidden">
+						<label for="settings-tab-select" class="sr-only">Choose settings section</label>
+						<div class="relative">
+							<select
+								id="settings-tab-select"
+								value={activeTab}
+								on:change={(event) => setActiveTab((event.currentTarget as HTMLSelectElement).value as SettingsTab)}
+								class="w-full pl-3 pr-9 py-2 bg-card border border-border/60 rounded-lg text-sm text-foreground appearance-none focus:outline-none focus:ring-2 focus:ring-primary"
+							>
+								{#each settingsTabs as tab}
+									<option value={tab.id}>{tab.label}</option>
+								{/each}
+							</select>
+							<svg class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+							</svg>
+						</div>
+					</div>
+					<div class="hidden sm:flex gap-2 overflow-x-auto pb-1">
+						{#each settingsTabs as tab}
+							<button
+								on:click={() => setActiveTab(tab.id)}
+								class="px-3 py-1.5 rounded-lg text-sm whitespace-nowrap border transition-colors {activeTab === tab.id ? 'bg-primary text-primary-foreground border-primary' : 'bg-card text-foreground border-border/60 hover:bg-muted/50'}"
+							>
+								{tab.label}
+							</button>
+						{/each}
+					</div>
+				</div>
 				{#if loading}
 			<div class="flex flex-col items-center justify-center py-20 gap-3">
 				<svg class="w-6 h-6 animate-spin text-primary" fill="none" viewBox="0 0 24 24">
@@ -443,6 +705,7 @@
 			</div>
 		{:else}
 			<div class="space-y-6">
+				{#if activeTab === 'api-access'}
 				<!-- API Settings Section -->
 				<div id="api-access" class="bg-card rounded-xl shadow-sm border border-border/50 p-6 animate-fade-in scroll-mt-16">
 					<h2 class="text-lg font-semibold text-foreground mb-4">API Access</h2>
@@ -531,7 +794,209 @@ curl "{getBaseUrl()}/api/v1/diaries?token={tokenStatus.token}&date={new Date().t
 						</div>
 					{/if}
 				</div>
+				{/if}
 
+				{#if activeTab === 'mood-weather'}
+				<!-- Mood & Weather Section -->
+				<div id="mood-weather" class="bg-card rounded-xl shadow-sm border border-border/50 p-6 animate-fade-in scroll-mt-16">
+					<div class="flex items-center justify-between gap-3 mb-4">
+						<h2 class="text-lg font-semibold text-foreground">Mood & Weather</h2>
+						<button
+							on:click={restoreAllDefaults}
+							class="px-3 py-1.5 text-xs bg-muted hover:bg-muted/80 rounded-lg transition-colors duration-200"
+						>
+							Restore All Defaults
+						</button>
+					</div>
+					<p class="text-sm text-muted-foreground mb-6">
+						Customize the options shown in the diary editor. Add any emoji or short text up to {MAX_DIARY_EMOJI_OPTION_LENGTH} characters, keep at least 1 and at most {MAX_DIARY_EMOJI_OPTION_COUNT} items in each list, then drag to reorder and save.
+					</p>
+
+					{#if emojiSettingsError}
+						<div class="mb-4 p-3 bg-red-500/10 text-red-600 rounded-lg text-sm">
+							{emojiSettingsError}
+						</div>
+					{/if}
+
+					{#if emojiSettingsSuccess}
+						<div class="mb-4 p-3 bg-green-500/10 text-green-600 rounded-lg text-sm">
+							{emojiSettingsSuccess}
+						</div>
+					{/if}
+
+					<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 pb-4 border-b border-border/50">
+						<div class="rounded-xl border border-border/50 p-4">
+							<div class="flex items-center justify-between gap-3 mb-2">
+								<div class="font-medium text-foreground">Mood options</div>
+								<button
+									on:click={restoreMoodDefaults}
+									class="px-2.5 py-1 text-xs bg-muted hover:bg-muted/80 rounded-lg transition-colors duration-200"
+								>
+									Restore Defaults
+								</button>
+							</div>
+							<div class="flex items-center gap-2 mb-3">
+								<input
+									type="text"
+									bind:value={moodInput}
+									maxlength={MAX_DIARY_EMOJI_OPTION_LENGTH}
+									placeholder="e.g. 😊"
+									class="flex-1 px-3 py-2 bg-muted rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+									on:keydown={(event) => {
+										if (event.key === 'Enter') {
+											event.preventDefault();
+											addMoodOption();
+										}
+									}}
+								/>
+								<button
+									on:click={addMoodOption}
+									class="px-3 py-2 text-sm bg-muted hover:bg-muted/80 rounded-lg transition-colors duration-200"
+								>
+									Add
+								</button>
+							</div>
+							<div class="text-xs text-muted-foreground mb-3">Maximum {MAX_DIARY_EMOJI_OPTION_LENGTH} characters per option, up to {MAX_DIARY_EMOJI_OPTION_COUNT} mood options total. Keep at least one. Drag chips to reorder.</div>
+							<div class="flex flex-wrap gap-2">
+								{#if moodOptions.length === 0}
+									<div class="text-sm text-muted-foreground">No mood options yet</div>
+								{:else}
+									{#each moodOptions as option, index}
+										<div
+											draggable="true"
+											role="listitem"
+											on:dragstart={() => handleDragStart('mood', index)}
+											on:dragover={(event) => handleDragOver(event, 'mood', index)}
+											on:drop={() => handleDrop('mood', index)}
+											on:dragend={clearDragState}
+											class="relative w-14 h-14 rounded-xl border transition-colors flex items-center justify-center cursor-grab select-none {dragOverType === 'mood' && dragOverIndex === index ? 'border-primary bg-primary/10' : 'bg-muted/70 border-border/60'}"
+											title={option}
+										>
+											<button
+												on:click|stopPropagation={() => removeMoodOption(option)}
+												class="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-background border border-border text-muted-foreground hover:text-destructive hover:border-destructive/50 transition-colors flex items-center justify-center"
+												aria-label={`Remove mood option ${option}`}
+											>
+												<svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+													<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.25" d="M6 6l12 12M18 6l-12 12" />
+												</svg>
+											</button>
+											<span class="text-xl leading-none">{option}</span>
+										</div>
+									{/each}
+									<div
+										role="status"
+										on:dragover={(event) => handleDragOver(event, 'mood', moodOptions.length - 1)}
+										on:drop={() => handleDropToEnd('mood')}
+										class="h-14 px-3 rounded-xl border border-dashed text-xs text-muted-foreground flex items-center {dragOverType === 'mood' ? 'border-primary bg-primary/5' : 'border-border/60'}"
+									>
+										Drop to end
+									</div>
+								{/if}
+							</div>
+						</div>
+
+						<div class="rounded-xl border border-border/50 p-4">
+							<div class="flex items-center justify-between gap-3 mb-2">
+								<div class="font-medium text-foreground">Weather options</div>
+								<button
+									on:click={restoreWeatherDefaults}
+									class="px-2.5 py-1 text-xs bg-muted hover:bg-muted/80 rounded-lg transition-colors duration-200"
+								>
+									Restore Defaults
+								</button>
+							</div>
+							<div class="flex items-center gap-2 mb-3">
+								<input
+									type="text"
+									bind:value={weatherInput}
+									maxlength={MAX_DIARY_EMOJI_OPTION_LENGTH}
+									placeholder="e.g. ☀️"
+									class="flex-1 px-3 py-2 bg-muted rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+									on:keydown={(event) => {
+										if (event.key === 'Enter') {
+											event.preventDefault();
+											addWeatherOption();
+										}
+									}}
+								/>
+								<button
+									on:click={addWeatherOption}
+									class="px-3 py-2 text-sm bg-muted hover:bg-muted/80 rounded-lg transition-colors duration-200"
+								>
+									Add
+								</button>
+							</div>
+							<div class="text-xs text-muted-foreground mb-3">Maximum {MAX_DIARY_EMOJI_OPTION_LENGTH} characters per option, up to {MAX_DIARY_EMOJI_OPTION_COUNT} weather options total. Keep at least one. Drag chips to reorder.</div>
+							<div class="flex flex-wrap gap-2">
+								{#if weatherOptions.length === 0}
+									<div class="text-sm text-muted-foreground">No weather options yet</div>
+								{:else}
+									{#each weatherOptions as option, index}
+										<div
+											draggable="true"
+											role="listitem"
+											on:dragstart={() => handleDragStart('weather', index)}
+											on:dragover={(event) => handleDragOver(event, 'weather', index)}
+											on:drop={() => handleDrop('weather', index)}
+											on:dragend={clearDragState}
+											class="relative w-14 h-14 rounded-xl border transition-colors flex items-center justify-center cursor-grab select-none {dragOverType === 'weather' && dragOverIndex === index ? 'border-primary bg-primary/10' : 'bg-muted/70 border-border/60'}"
+											title={option}
+										>
+											<button
+												on:click|stopPropagation={() => removeWeatherOption(option)}
+												class="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-background border border-border text-muted-foreground hover:text-destructive hover:border-destructive/50 transition-colors flex items-center justify-center"
+												aria-label={`Remove weather option ${option}`}
+											>
+												<svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+													<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.25" d="M6 6l12 12M18 6l-12 12" />
+												</svg>
+											</button>
+											<span class="text-xl leading-none">{option}</span>
+										</div>
+									{/each}
+									<div
+										role="status"
+										on:dragover={(event) => handleDragOver(event, 'weather', weatherOptions.length - 1)}
+										on:drop={() => handleDropToEnd('weather')}
+										class="h-14 px-3 rounded-xl border border-dashed text-xs text-muted-foreground flex items-center {dragOverType === 'weather' ? 'border-primary bg-primary/5' : 'border-border/60'}"
+									>
+										Drop to end
+									</div>
+								{/if}
+							</div>
+						</div>
+					</div>
+
+					<div class="pt-4 flex items-center gap-3">
+						<button
+							on:click={handleSaveEmojiSettings}
+							disabled={emojiSettingsSaving || !emojiSettingsChanged}
+							class="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+						>
+							{#if emojiSettingsSaving}
+								<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+									<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+									<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+								</svg>
+								Saving...
+							{:else}
+								Save Mood & Weather Settings
+							{/if}
+						</button>
+						{#if emojiSettingsSuccess}
+							<span class="text-sm text-green-600 flex items-center gap-1 animate-fade-in">
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+								</svg>
+								Saved
+							</span>
+						{/if}
+					</div>
+				</div>
+				{/if}
+
+				{#if activeTab === 'ai-assistant'}
 				<!-- AI Settings Section -->
 				<div id="ai-assistant" class="bg-card rounded-xl shadow-sm border border-border/50 p-6 animate-fade-in scroll-mt-16">
 					<h2 class="text-lg font-semibold text-foreground mb-4">AI Assistant</h2>
@@ -587,16 +1052,21 @@ curl "{getBaseUrl()}/api/v1/diaries?token={tokenStatus.token}&date={new Date().t
 					<div class="py-4 border-b border-border/50">
 						<label for="ai-chat-model" class="block font-medium text-foreground mb-2">Chat Model</label>
 						<div class="flex items-center gap-2">
-							<select
-								id="ai-chat-model"
-								bind:value={aiSettings.chat_model}
-								class="flex-1 px-3 py-2 bg-muted rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-							>
-								<option value="">Select a model</option>
-								{#each chatModels as model}
-									<option value={model.id}>{model.id}</option>
-								{/each}
-							</select>
+							<div class="relative flex-1">
+								<select
+									id="ai-chat-model"
+									bind:value={aiSettings.chat_model}
+									class="w-full pl-3 pr-9 py-2 bg-muted rounded-lg text-sm text-foreground appearance-none focus:outline-none focus:ring-2 focus:ring-primary"
+								>
+									<option value="">Select a model</option>
+									{#each chatModels as model}
+										<option value={model.id}>{model.id}</option>
+									{/each}
+								</select>
+								<svg class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+								</svg>
+							</div>
 							<button
 								on:click={handleFetchModels}
 								disabled={fetchingModels}
@@ -615,16 +1085,21 @@ curl "{getBaseUrl()}/api/v1/diaries?token={tokenStatus.token}&date={new Date().t
 					<div class="py-4 border-b border-border/50">
 						<label for="ai-embedding-model" class="block font-medium text-foreground mb-2">Embedding Model</label>
 						<div class="flex items-center gap-2">
-							<select
-								id="ai-embedding-model"
-								bind:value={aiSettings.embedding_model}
-								class="flex-1 px-3 py-2 bg-muted rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-							>
-								<option value="">Select a model</option>
-								{#each embeddingModels as model}
-									<option value={model.id}>{model.id}</option>
-								{/each}
-							</select>
+							<div class="relative flex-1">
+								<select
+									id="ai-embedding-model"
+									bind:value={aiSettings.embedding_model}
+									class="w-full pl-3 pr-9 py-2 bg-muted rounded-lg text-sm text-foreground appearance-none focus:outline-none focus:ring-2 focus:ring-primary"
+								>
+									<option value="">Select a model</option>
+									{#each embeddingModels as model}
+										<option value={model.id}>{model.id}</option>
+									{/each}
+								</select>
+								<svg class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+								</svg>
+							</div>
 							<button
 								on:click={handleFetchModels}
 								disabled={fetchingModels}
@@ -855,7 +1330,9 @@ curl "{getBaseUrl()}/api/v1/diaries?token={tokenStatus.token}&date={new Date().t
 						{/if}
 					</div>
 				</div>
+				{/if}
 
+				{#if activeTab === 'image-upload'}
 				<!-- Image Upload (Chevereto) Section -->
 				<div id="image-upload" class="bg-card rounded-xl shadow-sm border border-border/50 p-6 animate-fade-in scroll-mt-16">
 					<h2 class="text-lg font-semibold text-foreground mb-4">Image Upload</h2>
@@ -1002,7 +1479,9 @@ curl "{getBaseUrl()}/api/v1/diaries?token={tokenStatus.token}&date={new Date().t
 						{/if}
 					</div>
 				</div>
+				{/if}
 
+				{#if activeTab === 'data-management'}
 				<!-- Data Management Section -->
 				<div id="data-management" class="bg-card rounded-xl shadow-sm border border-border/50 p-6 animate-fade-in scroll-mt-16">
 					<h2 class="text-lg font-semibold text-foreground mb-4">Data Management</h2>
@@ -1032,18 +1511,23 @@ curl "{getBaseUrl()}/api/v1/diaries?token={tokenStatus.token}&date={new Date().t
 								<!-- Date Range -->
 								<div>
 									<label for="export-date-range" class="block text-sm font-medium text-foreground mb-2">Date Range</label>
-									<select
-										id="export-date-range"
-										bind:value={exportOptions.date_range}
-										class="w-full px-3 py-2 bg-background rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary border border-border/50"
-									>
-										<option value="1m">Past 1 month</option>
-										<option value="3m">Past 3 months</option>
-										<option value="6m">Past 6 months</option>
-										<option value="1y">Past 1 year</option>
-										<option value="all">All time</option>
-										<option value="custom">Custom range</option>
-									</select>
+									<div class="relative">
+										<select
+											id="export-date-range"
+											bind:value={exportOptions.date_range}
+											class="w-full pl-3 pr-9 py-2 bg-background rounded-lg text-sm text-foreground appearance-none focus:outline-none focus:ring-2 focus:ring-primary border border-border/50"
+										>
+											<option value="1m">Past 1 month</option>
+											<option value="3m">Past 3 months</option>
+											<option value="6m">Past 6 months</option>
+											<option value="1y">Past 1 year</option>
+											<option value="all">All time</option>
+											<option value="custom">Custom range</option>
+										</select>
+										<svg class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+										</svg>
+									</div>
 								</div>
 
 								{#if exportOptions.date_range === 'custom'}
@@ -1244,138 +1728,12 @@ curl "{getBaseUrl()}/api/v1/diaries?token={tokenStatus.token}&date={new Date().t
 						{/if}
 					</div>
 				</div>
+				{/if}
 			</div>
 		{/if}
 	</main>
-
-			<!-- Desktop TOC Sidebar -->
-			{#if showDesktopToc}
-				<aside class="hidden lg:block w-56 flex-shrink-0">
-					<div class="sticky top-16 animate-slide-in-right">
-						<div class="bg-card/50 rounded-xl border border-border/50 p-4">
-							<SettingsToc />
-						</div>
-					</div>
-				</aside>
-			{/if}
 		</div>
 	</div>
 
 	<Footer maxWidth="6xl" tagline="Manage your settings" />
 </div>
-
-<!-- Mobile Drawer -->
-{#if showMobileToc}
-	<!-- Backdrop -->
-	<button
-		class="fixed inset-0 bg-black/40 backdrop-blur-sm z-40 lg:hidden"
-		on:click={() => showMobileToc = false}
-		aria-label="Close menu"
-	></button>
-
-	<!-- Drawer Panel -->
-	<div class="fixed inset-y-0 left-0 w-72 bg-card border-r border-border shadow-2xl z-50 lg:hidden animate-slide-in-left">
-		<!-- Drawer Header -->
-		<div class="flex items-center justify-between px-5 py-4 border-b border-border/50">
-			<div class="flex items-center gap-2">
-				<img src="/logo.png" alt="Diarum" class="w-6 h-6" />
-				<span class="font-semibold text-foreground">Settings</span>
-			</div>
-			<button
-				on:click={() => showMobileToc = false}
-				class="p-2 hover:bg-muted rounded-lg transition-colors"
-				aria-label="Close"
-			>
-				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-				</svg>
-			</button>
-		</div>
-
-		<!-- Drawer Content -->
-		<div class="flex flex-col h-[calc(100%-57px)]">
-			<!-- Actions Section -->
-			<div class="px-3 py-3">
-				<div class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2 px-1">
-					Quick Actions
-				</div>
-				<div class="space-y-0.5">
-					<a
-						href="/diary"
-						class="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-muted/70 transition-all duration-200 group"
-						on:click={() => showMobileToc = false}
-					>
-						<div class="p-1.5 rounded-md bg-green-500/10 text-green-500 group-hover:bg-green-500/20 transition-colors">
-							<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-									d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-							</svg>
-						</div>
-						<div class="min-w-0">
-							<div class="text-xs font-medium text-foreground">Calendar</div>
-							<div class="text-[10px] text-muted-foreground truncate">View all diary entries</div>
-						</div>
-					</a>
-
-					<a
-						href="/assistant"
-						class="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-muted/70 transition-all duration-200 group"
-						on:click={() => showMobileToc = false}
-					>
-						<div class="p-1.5 rounded-md bg-primary/10 text-primary group-hover:bg-primary/20 transition-colors">
-							<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<rect x="4" y="6" width="16" height="12" rx="2" stroke-width="2"/>
-								<circle cx="9" cy="11" r="1.5" fill="currentColor"/>
-								<circle cx="15" cy="11" r="1.5" fill="currentColor"/>
-							</svg>
-						</div>
-						<div class="min-w-0">
-							<div class="text-xs font-medium text-foreground">AI Assistant</div>
-							<div class="text-[10px] text-muted-foreground truncate">Chat with AI about your diary</div>
-						</div>
-					</a>
-
-					<a
-						href="/search"
-						class="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-muted/70 transition-all duration-200 group"
-						on:click={() => showMobileToc = false}
-					>
-						<div class="p-1.5 rounded-md bg-blue-500/10 text-blue-500 group-hover:bg-blue-500/20 transition-colors">
-							<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-							</svg>
-						</div>
-						<div class="min-w-0">
-							<div class="text-xs font-medium text-foreground">Search</div>
-							<div class="text-[10px] text-muted-foreground truncate">Find diary entries</div>
-						</div>
-					</a>
-
-					<a
-						href="/media"
-						class="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-muted/70 transition-all duration-200 group"
-						on:click={() => showMobileToc = false}
-					>
-						<div class="p-1.5 rounded-md bg-purple-500/10 text-purple-500 group-hover:bg-purple-500/20 transition-colors">
-							<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-							</svg>
-						</div>
-						<div class="min-w-0">
-							<div class="text-xs font-medium text-foreground">Media</div>
-							<div class="text-[10px] text-muted-foreground truncate">Browse photos & files</div>
-						</div>
-					</a>
-				</div>
-			</div>
-
-			<!-- Divider -->
-			<div class="mx-3 border-t border-border/50"></div>
-
-			<!-- TOC Section -->
-			<div class="flex-1 overflow-y-auto px-3 py-3">
-				<SettingsToc onNavigate={() => showMobileToc = false} />
-			</div>
-		</div>
-	</div>
-{/if}
